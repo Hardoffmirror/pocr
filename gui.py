@@ -12,6 +12,7 @@ from models import Item, Mod, ModType, ModTier, ItemClass
 from simulator import RecombinatorSimulator
 from calculator import RecombinatorCalculator
 from item_parser import ItemParser
+from craft_advisor import CraftAdvisor, CraftStrategy
 
 
 class RecombinatorGUI:
@@ -25,6 +26,7 @@ class RecombinatorGUI:
         # Инициализация симулятора и калькулятора
         self.simulator = RecombinatorSimulator()
         self.calculator = RecombinatorCalculator()
+        self.advisor = CraftAdvisor()
 
         # Хранилище данных
         self.item1: Optional[Item] = None
@@ -103,6 +105,11 @@ class RecombinatorGUI:
         self.tab_guide = ttk.Frame(self.notebook)
         self.notebook.add(self.tab_guide, text="Гайд")
         self._create_guide_tab()
+
+        # Вкладка 6: Помощник крафта
+        self.tab_advisor = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_advisor, text="🎯 Помощник крафта")
+        self._create_advisor_tab()
 
     def _create_setup_tab(self):
         """Создание вкладки настройки предметов"""
@@ -430,6 +437,283 @@ NNN моды - это моды которые не могут появиться
 
         guide_text.insert(1.0, guide_content)
         guide_text.config(state='disabled')  # Только для чтения
+
+    def _create_advisor_tab(self):
+        """Создание вкладки помощника крафта"""
+        # Главный контейнер с прокруткой
+        main_canvas = tk.Canvas(self.tab_advisor)
+        scrollbar = ttk.Scrollbar(self.tab_advisor, orient="vertical", command=main_canvas.yview)
+        scrollable_frame = ttk.Frame(main_canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+        )
+
+        main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        main_canvas.configure(yscrollcommand=scrollbar.set)
+
+        main_canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Заголовок
+        title_frame = ttk.Frame(scrollable_frame)
+        title_frame.pack(fill='x', padx=10, pady=10)
+
+        ttk.Label(title_frame, text="🎯 Помощник по крафту рекомбинаторов",
+                 style='Title.TLabel').pack()
+        ttk.Label(title_frame, text="Отметьте желаемые моды и получите оптимальную стратегию крафта",
+                 font=('Arial', 10)).pack()
+
+        # Секция выбора желаемых модов
+        selection_frame = ttk.LabelFrame(scrollable_frame, text="Желаемые моды", padding=10)
+        selection_frame.pack(fill='both', expand=True, padx=10, pady=5)
+
+        # Создаем две колонки для префиксов и суффиксов
+        cols_frame = ttk.Frame(selection_frame)
+        cols_frame.pack(fill='both', expand=True)
+
+        # Префиксы
+        prefix_frame = ttk.LabelFrame(cols_frame, text="Префиксы (макс 3)", padding=10)
+        prefix_frame.pack(side='left', fill='both', expand=True, padx=5)
+
+        # Кнопка добавления префикса
+        ttk.Button(prefix_frame, text="+ Добавить префикс",
+                  command=lambda: self._add_desired_mod_dialog(ModType.PREFIX)).pack(pady=5)
+
+        # Список желаемых префиксов
+        self.desired_prefixes_listbox = tk.Listbox(prefix_frame, height=8)
+        self.desired_prefixes_listbox.pack(fill='both', expand=True, pady=5)
+
+        ttk.Button(prefix_frame, text="Удалить выбранный",
+                  command=lambda: self._remove_desired_mod(ModType.PREFIX)).pack()
+
+        # Суффиксы
+        suffix_frame = ttk.LabelFrame(cols_frame, text="Суффиксы (макс 3)", padding=10)
+        suffix_frame.pack(side='left', fill='both', expand=True, padx=5)
+
+        # Кнопка добавления суффикса
+        ttk.Button(suffix_frame, text="+ Добавить суффикс",
+                  command=lambda: self._add_desired_mod_dialog(ModType.SUFFIX)).pack(pady=5)
+
+        # Список желаемых суффиксов
+        self.desired_suffixes_listbox = tk.Listbox(suffix_frame, height=8)
+        self.desired_suffixes_listbox.pack(fill='both', expand=True, pady=5)
+
+        ttk.Button(suffix_frame, text="Удалить выбранный",
+                  command=lambda: self._remove_desired_mod(ModType.SUFFIX)).pack()
+
+        # Хранилища для желаемых модов
+        self.desired_prefixes: List[Mod] = []
+        self.desired_suffixes: List[Mod] = []
+
+        # Кнопка анализа
+        analyze_btn_frame = ttk.Frame(scrollable_frame)
+        analyze_btn_frame.pack(fill='x', padx=10, pady=10)
+
+        ttk.Button(analyze_btn_frame, text="🔍 Проанализировать и получить рекомендации",
+                  command=self._analyze_craft,
+                  style='TButton').pack(pady=5)
+
+        # Результаты анализа
+        results_frame = ttk.LabelFrame(scrollable_frame, text="Результаты анализа", padding=10)
+        results_frame.pack(fill='both', expand=True, padx=10, pady=5)
+
+        self.advisor_results_text = scrolledtext.ScrolledText(results_frame, wrap=tk.WORD,
+                                                              height=25, font=('Consolas', 10))
+        self.advisor_results_text.pack(fill='both', expand=True)
+
+    def _add_desired_mod_dialog(self, mod_type: ModType):
+        """Диалог добавления желаемого мода"""
+        # Проверяем лимиты
+        if mod_type == ModType.PREFIX and len(self.desired_prefixes) >= 3:
+            messagebox.showwarning("Внимание", "Максимум 3 префикса")
+            return
+        if mod_type == ModType.SUFFIX and len(self.desired_suffixes) >= 3:
+            messagebox.showwarning("Внимание", "Максимум 3 суффикса")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Добавить желаемый {mod_type.value}")
+        dialog.geometry("400x450")
+
+        # Название мода
+        ttk.Label(dialog, text="Название мода:").pack(pady=5)
+        name_var = tk.StringVar()
+        ttk.Entry(dialog, textvariable=name_var, width=40).pack(pady=5)
+
+        # Группа мода
+        ttk.Label(dialog, text="Группа мода (например, 'Life', 'ColdResistance'):").pack(pady=5)
+        group_var = tk.StringVar()
+        ttk.Entry(dialog, textvariable=group_var, width=40).pack(pady=5)
+
+        # Тир
+        ttk.Label(dialog, text="Желаемый тир:").pack(pady=5)
+        tier_var = tk.StringVar()
+        ttk.Combobox(dialog, textvariable=tier_var, values=[t.name for t in ModTier],
+                    width=38).pack(pady=5)
+        tier_var.set("T1")
+
+        # Эксклюзивный?
+        exclusive_var = tk.BooleanVar()
+        ttk.Checkbutton(dialog, text="Эксклюзивный мод (essence, fossil, etc.)",
+                       variable=exclusive_var).pack(pady=5)
+
+        # Информация
+        info_label = ttk.Label(dialog,
+                              text="💡 Укажите моды которые вы хотите получить\nв финальном предмете",
+                              foreground='blue')
+        info_label.pack(pady=10)
+
+        def add_mod():
+            if not name_var.get() or not group_var.get():
+                messagebox.showwarning("Внимание", "Заполните название и группу")
+                return
+
+            mod = Mod(
+                name=name_var.get(),
+                mod_type=mod_type,
+                tier=ModTier[tier_var.get()],
+                mod_group=group_var.get(),
+                is_exclusive=exclusive_var.get()
+            )
+
+            if mod_type == ModType.PREFIX:
+                self.desired_prefixes.append(mod)
+                self.desired_prefixes_listbox.insert(tk.END, str(mod))
+            else:
+                self.desired_suffixes.append(mod)
+                self.desired_suffixes_listbox.insert(tk.END, str(mod))
+
+            dialog.destroy()
+
+        ttk.Button(dialog, text="Добавить", command=add_mod).pack(pady=20)
+
+    def _remove_desired_mod(self, mod_type: ModType):
+        """Удаление желаемого мода"""
+        if mod_type == ModType.PREFIX:
+            selection = self.desired_prefixes_listbox.curselection()
+            if selection:
+                idx = selection[0]
+                self.desired_prefixes.pop(idx)
+                self.desired_prefixes_listbox.delete(idx)
+        else:
+            selection = self.desired_suffixes_listbox.curselection()
+            if selection:
+                idx = selection[0]
+                self.desired_suffixes.pop(idx)
+                self.desired_suffixes_listbox.delete(idx)
+
+    def _analyze_craft(self):
+        """Анализ и вывод рекомендаций"""
+        if not self.desired_prefixes and not self.desired_suffixes:
+            messagebox.showwarning("Внимание", "Добавьте желаемые моды для анализа")
+            return
+
+        # Валидация
+        is_valid, issues = self.advisor.validate_desired_combination(
+            self.desired_prefixes + self.desired_suffixes
+        )
+
+        # Получаем рекомендации
+        recommendation = self.advisor.analyze_desired_outcome(
+            self.desired_prefixes,
+            self.desired_suffixes
+        )
+
+        # Форматируем результат
+        result_text = self._format_recommendation(recommendation, is_valid, issues)
+
+        # Выводим
+        self.advisor_results_text.delete(1.0, tk.END)
+        self.advisor_results_text.insert(1.0, result_text)
+
+    def _format_recommendation(self, rec, is_valid, issues) -> str:
+        """Форматирование рекомендации для отображения"""
+        lines = []
+        lines.append("=" * 80)
+        lines.append("АНАЛИЗ ЖЕЛАЕМОГО РЕЗУЛЬТАТА")
+        lines.append("=" * 80)
+        lines.append("")
+
+        # Желаемые моды
+        lines.append("Вы хотите получить:")
+        lines.append("")
+        lines.append(f"Префиксы ({len(self.desired_prefixes)}):")
+        for mod in self.desired_prefixes:
+            lines.append(f"  • {mod}")
+        lines.append("")
+        lines.append(f"Суффиксы ({len(self.desired_suffixes)}):")
+        for mod in self.desired_suffixes:
+            lines.append(f"  • {mod}")
+        lines.append("")
+
+        # Валидация
+        if not is_valid:
+            lines.append("❌ ОБНАРУЖЕНЫ ПРОБЛЕМЫ:")
+            for issue in issues:
+                lines.append(f"  • {issue}")
+            lines.append("")
+
+        lines.append("=" * 80)
+        lines.append(f"РЕКОМЕНДУЕМАЯ СТРАТЕГИЯ: {rec.strategy.value}")
+        lines.append("=" * 80)
+        lines.append("")
+
+        # Сложность
+        feasibility_emoji = {
+            "Легко": "✅",
+            "Средне": "⚠️",
+            "Сложно": "🔶",
+            "Очень сложно": "🔴",
+            "Невозможно": "❌"
+        }
+        emoji = feasibility_emoji.get(rec.feasibility, "")
+        lines.append(f"{emoji} Сложность: {rec.feasibility}")
+        lines.append(f"📊 Вероятность успеха: {rec.success_probability:.1%}")
+        lines.append(f"🎲 Среднее кол-во попыток: {rec.average_attempts}")
+        lines.append("")
+
+        # Предупреждения
+        if rec.warnings:
+            lines.append("⚠️  ПРЕДУПРЕЖДЕНИЯ:")
+            for warning in rec.warnings:
+                lines.append(f"  {warning}")
+            lines.append("")
+
+        # Пошаговый план
+        lines.append("=" * 80)
+        lines.append("ПОШАГОВЫЙ ПЛАН:")
+        lines.append("=" * 80)
+        lines.append("")
+        for step in rec.steps:
+            lines.append(step)
+        lines.append("")
+
+        # Ресурсы
+        if rec.estimated_cost:
+            lines.append("=" * 80)
+            lines.append("НЕОБХОДИМЫЕ РЕСУРСЫ (примерно):")
+            lines.append("=" * 80)
+            for resource, amount in rec.estimated_cost.items():
+                if isinstance(amount, (int, float)):
+                    lines.append(f"  • {resource}: {amount}")
+                else:
+                    lines.append(f"  • {resource}: {amount}")
+            lines.append("")
+
+        # Советы
+        if rec.tips:
+            lines.append("💡 ПОЛЕЗНЫЕ СОВЕТЫ:")
+            for tip in rec.tips:
+                lines.append(f"  {tip}")
+            lines.append("")
+
+        lines.append("=" * 80)
+        lines.append("Удачного крафта! Используйте симулятор для проверки вероятностей.")
+        lines.append("=" * 80)
+
+        return "\n".join(lines)
 
     def _create_item(self, item_num, name, item_class_str, ilvl):
         """Создание предмета"""
