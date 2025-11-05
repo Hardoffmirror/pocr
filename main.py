@@ -8,17 +8,26 @@ PoE Recombinator Simulator - Главный файл запуска
 
 import sys
 import tkinter as tk
-from gui import RecombinatorGUI
 
 
 def main():
     """Точка входа в приложение"""
     try:
+        # Проверяем аргументы командной строки
+        use_old_gui = '--old' in sys.argv or '--tabs' in sys.argv
+
         # Создаем главное окно
         root = tk.Tk()
 
-        # Инициализируем GUI
-        app = RecombinatorGUI(root)
+        # Выбираем GUI
+        if use_old_gui:
+            from gui import RecombinatorGUI
+            app = RecombinatorGUI(root)
+            print("Запущен старый интерфейс с вкладками")
+        else:
+            from gui_new import CompactRecombinatorGUI
+            app = CompactRecombinatorGUI(root)
+            print("Запущен новый компактный интерфейс")
 
         # Запускаем главный цикл
         root.mainloop()
