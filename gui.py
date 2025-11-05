@@ -11,6 +11,7 @@ from matplotlib.figure import Figure
 from models import Item, Mod, ModType, ModTier, ItemClass
 from simulator import RecombinatorSimulator
 from calculator import RecombinatorCalculator
+from item_parser import ItemParser
 
 
 class RecombinatorGUI:
@@ -98,6 +99,11 @@ class RecombinatorGUI:
         self.notebook.add(self.tab_stats, text="Статистика")
         self._create_stats_tab()
 
+        # Вкладка 5: Гайд по рекомбинаторам
+        self.tab_guide = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_guide, text="Гайд")
+        self._create_guide_tab()
+
     def _create_setup_tab(self):
         """Создание вкладки настройки предметов"""
         # Разделяем на два фрейма для двух предметов
@@ -140,11 +146,16 @@ class RecombinatorGUI:
         ilvl_var = tk.IntVar(value=85)
         ttk.Spinbox(basic_frame, from_=1, to=100, textvariable=ilvl_var, width=28).grid(row=2, column=1, pady=2)
 
-        # Кнопка создания предмета
-        ttk.Button(basic_frame, text="Создать предмет",
+        # Кнопки создания и импорта предмета
+        button_container = ttk.Frame(basic_frame)
+        button_container.grid(row=3, column=0, columnspan=2, pady=10)
+
+        ttk.Button(button_container, text="Создать предмет",
                   command=lambda: self._create_item(item_num, name_var.get(),
-                                                    class_var.get(), ilvl_var.get())).grid(
-            row=3, column=0, columnspan=2, pady=10)
+                                                    class_var.get(), ilvl_var.get())).pack(side='left', padx=5)
+
+        ttk.Button(button_container, text="Импорт из текста",
+                  command=lambda: self._import_item_dialog(item_num)).pack(side='left', padx=5)
 
         # Фрейм для модов
         mods_frame = ttk.LabelFrame(parent, text="Модификаторы", padding=10)
@@ -249,6 +260,177 @@ class RecombinatorGUI:
 
         self.chart_frame = chart_frame
 
+    def _create_guide_tab(self):
+        """Создание вкладки с гайдом по рекомбинаторам"""
+        # Создаем ScrolledText для отображения гайда
+        guide_text = scrolledtext.ScrolledText(self.tab_guide, wrap=tk.WORD,
+                                               font=('Arial', 10), padx=10, pady=10)
+        guide_text.pack(fill='both', expand=True)
+
+        # Полный текст гайда
+        guide_content = """
+═══════════════════════════════════════════════════════════════════════════
+                    ПОЛНЫЙ ГАЙД ПО РЕКОМБИНАТОРАМ POE
+═══════════════════════════════════════════════════════════════════════════
+
+📋 ОСНОВНЫЕ ПРАВИЛА РЕКОМБИНАЦИИ
+
+1. СОВМЕСТИМОСТЬ ПРЕДМЕТОВ:
+   • Предметы должны быть одного класса (оба кольца, оба меча и т.д.)
+   • Нельзя рекомбинировать Corrupted или Mirrored предметы
+   • Оба предмета должны быть Magic или Rare
+
+2. ВЫБОР БАЗЫ:
+   • Есть 50% шанс, что любой из двух предметов станет базой результата
+   • Item Level результата = максимальный iLvl из двух предметов
+   • Тип базы (например, Synthesised) сохраняется с базового предмета
+
+3. ВЫБОР МОДОВ:
+   • Префиксы и суффиксы обрабатываются отдельно
+   • Из каждой группы модов можно выбрать только ОДИН мод
+   • Максимум 3 префикса и 3 суффикса в результате
+   • Fractured моды НЕ переносятся, но могут остаться на оригинальной базе
+
+═══════════════════════════════════════════════════════════════════════════
+
+📊 ТАБЛИЦА ВЕРОЯТНОСТЕЙ УСПЕХА
+
+Начальные моды → Желаемый результат → Вероятность успеха
+
+2 префикса → 2 префикса: 33%
+4 префикса → 3 префикса: 31%
+6 префиксов → 3 префикса: 13%
+
+Формула вероятности успеха:
+    Success Rate = 35% - (5% × кол-во модов) - (2% × сумма тиров) + бонусы
+
+Где:
+    • Базовый шанс: 35%
+    • Штраф за моды: 5% за каждый выбранный мод
+    • Штраф за тиры: 2% × (7 - значение тира), T1 = больше штраф
+    • Бонус за малый пул: 5% × (6 - общее кол-во модов) если < 6
+
+═══════════════════════════════════════════════════════════════════════════
+
+⭐ ЭКСКЛЮЗИВНЫЕ МОДЫ (EXCLUSIVE MODS)
+
+Эксклюзивные моды включают:
+    • Essence моды
+    • Beast Aspects
+    • Breach/Incursion моды
+    • Meta-моды (Can have 3 Crafted Modifiers)
+    • Elevated Influenced моды
+    • Delve моды
+    • Veiled моды и крафты
+
+ВАЖНОЕ ПРАВИЛО:
+    Если выбран один эксклюзивный мод, все остальные эксклюзивные
+    моды УДАЛЯЮТСЯ из пула! Но оставшиеся обычные моды переносятся.
+
+ТЕХНИКА ИСПОЛЬЗОВАНИЯ:
+    1. Создайте предмет с 2 желаемыми префиксами
+    2. Добавьте 4 эксклюзивных мода крафтом
+    3. Второй предмет: 1 желаемый префикс + 4 эксклюзивных
+    4. При рекомбинации если выбран эксклюзивный мод, остальные
+       удаляются, но 3 желаемых префикса остаются!
+
+═══════════════════════════════════════════════════════════════════════════
+
+🎯 МОДЫ NNN (NON-NATIVE NATURAL)
+
+NNN моды - это моды которые не могут появиться на базе естественно:
+    • ES моды на чистых Armour/Strength базах
+    • Evasion моды на чистых ES/Intelligence базах
+    • Suppression на базах без Evasion
+    • Influenced моды на неинфлюенснутых базах
+
+ИСПОЛЬЗОВАНИЕ:
+    • Заполните один предмет NNN модами которые не нужны
+    • Второй предмет с желаемыми модами
+    • NNN моды не переносятся, увеличивая шанс переноса нужных!
+
+ПРИМЕР:
+    Предмет 1: T1 Life + PDR + 3 NNN мода (Intelligence, ES recharge, Max ES)
+    Предмет 2: T1 Suppression + Armour/Evasion
+    Результат: Высокий шанс получить все 4 желаемых мода!
+
+═══════════════════════════════════════════════════════════════════════════
+
+💡 ПРОДВИНУТЫЕ ТЕХНИКИ
+
+1. БАЗОВАЯ РЕКОМБИНАЦИЯ (3 МОДА):
+   • Накатайте Alterations на ~36 баз с нужными модами
+   • Объедините 1-модные базы в 2-модные (шанс 33%)
+   • Объедините 2-модные базы в 3-модные (шанс 31%)
+   • В среднем нужно ~36 баз для одной 3-модной
+
+2. ПРОДВИНУТАЯ РЕКОМБИНАЦИЯ (5 МОДОВ):
+   • Создайте 2 базы: одна с 2P+2S, другая с 2P+2S
+   • Добавьте эксклюзивные моды: 4 на первую базу, 3 на вторую
+   • Объедините: если выбран exclusive, все желаемые моды переносятся!
+   • Повторяйте с "неудачными" базами пока не получите 5 модов
+
+3. ТЕХНИКА С ROG БАЗАМИ:
+   • Используйте NNN моды на базах от Rog
+   • Комбинируйте с вашей желаемой базой
+   • Экономите Divine Orbs!
+
+4. ПОВЫШЕНИЕ ITEM LEVEL:
+   • Нужна iLvl 86 база? Объедините iLvl 84+ с любой iLvl 86+
+   • Шанс 50/50 получить iLvl 86 на нужной базе!
+
+═══════════════════════════════════════════════════════════════════════════
+
+⚠️ ВАЖНЫЕ СОВЕТЫ
+
+✓ Используйте Orb of Annulment для удаления нежелательных модов
+✓ Используйте Regex (poe.re) для быстрого поиска нужных модов
+✓ "Провальные" базы с хорошими модами можно использовать повторно!
+✓ Заполняйте провальные базы эксклюзивными модами и пробуйте снова
+✓ Не расстраивайтесь - это рандом, среднее значение попыток не гарантия
+
+✗ НЕ крафтите 1-модные базы без второго мода (дороже в dust)
+✗ НЕ забывайте про группы модов (только один мод из группы!)
+✗ НЕ пытайтесь комбинировать два разных эксклюзивных мода
+✗ НЕ игнорируйте NNN правила - используйте их!
+
+═══════════════════════════════════════════════════════════════════════════
+
+📖 ПРИМЕРЫ КРАФТА
+
+ПРИМЕР 1: ФИЗИЧЕСКОЕ ОРУЖИЕ (3 ПРЕФИКСА)
+    Цель: % Physical Damage + Flat Physical + Hybrid Physical
+
+    Шаг 1: Накатайте ~36 баз с Alterations
+    Шаг 2: Объедините 1-модные → 2-модные (нужно ~18 попыток)
+    Шаг 3: Объедините 2-модные → 3-модные (нужно ~6 попыток)
+
+    Итого: ~36 баз, ~1000 Alterations
+
+ПРИМЕР 2: ИДЕАЛЬНЫЙ ДОСПЕХ (5 МОДОВ)
+    Цель: T1 Flat ES + % ES + Hybrid ES + Suppression + Intelligence
+
+    Шаг 1: База 1: 2P (Flat ES, % ES) + 1S (Suppression)
+    Шаг 2: База 2: 2P (Flat ES, Hybrid ES) + 1S (Intelligence)
+    Шаг 3: Заполните базу 1: добавьте 3 эксклюзивных крафта
+    Шаг 4: Заполните базу 2: добавьте 4 эксклюзивных мода
+    Шаг 5: Объедините! При выборе exclusive все 5 модов переносятся
+
+═══════════════════════════════════════════════════════════════════════════
+
+🎓 ИСТОЧНИКИ И БЛАГОДАРНОСТИ
+
+Информация основана на:
+    • Maxroll.gg Recombination Guide
+    • Community testing и research
+    • Reddit user /u/Butsicles
+
+Удачи в крафте, Exile! 🔥
+        """
+
+        guide_text.insert(1.0, guide_content)
+        guide_text.config(state='disabled')  # Только для чтения
+
     def _create_item(self, item_num, name, item_class_str, ilvl):
         """Создание предмета"""
         try:
@@ -273,6 +455,85 @@ class RecombinatorGUI:
 
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось создать предмет: {str(e)}")
+
+    def _import_item_dialog(self, item_num):
+        """Диалог импорта предмета из текста"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Импорт предмета {item_num} из текста")
+        dialog.geometry("700x600")
+
+        # Инструкция
+        ttk.Label(dialog, text="Вставьте текст предмета из игры (Ctrl+C в игре):",
+                 font=('Arial', 10, 'bold')).pack(pady=10)
+
+        # Текстовое поле для вставки
+        text_widget = scrolledtext.ScrolledText(dialog, width=80, height=25, wrap=tk.WORD,
+                                                font=('Consolas', 9))
+        text_widget.pack(padx=10, pady=5, fill='both', expand=True)
+
+        # Пример для помощи
+        example_text = """Пример формата:
+Класс предмета: Кольца
+Редкость: Редкий
+Громадный захват
+Кольцо без камня
+--------
+Уровень предмета: 86
+--------
+Имеет 1 гнездо (implicit)
+--------
++29% к сопротивлению хаосу (fractured)
++37 к максимуму энергетического щита
++48% к сопротивлению холоду
+        """
+        text_widget.insert(1.0, example_text)
+
+        # Кнопки
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(pady=10)
+
+        def import_item():
+            text = text_widget.get(1.0, tk.END)
+            parser = ItemParser()
+            item = parser.parse_item_text(text)
+
+            if item:
+                # Устанавливаем предмет
+                if item_num == 1:
+                    self.item1 = item
+                    self.current_mods_item1 = item.all_mods.copy()
+                    # Обновляем поля в GUI
+                    self.item1_name_var.set(item.name)
+                    self.item1_class_var.set(item.item_class.value)
+                    self.item1_ilvl_var.set(item.item_level)
+                else:
+                    self.item2 = item
+                    self.current_mods_item2 = item.all_mods.copy()
+                    # Обновляем поля в GUI
+                    self.item2_name_var.set(item.name)
+                    self.item2_class_var.set(item.item_class.value)
+                    self.item2_ilvl_var.set(item.item_level)
+
+                self._update_mod_lists()
+                self._update_displays()
+
+                messagebox.showinfo("Успех",
+                                  f"Предмет импортирован!\n\n"
+                                  f"Название: {item.name}\n"
+                                  f"Класс: {item.item_class.value}\n"
+                                  f"iLvl: {item.item_level}\n"
+                                  f"Модов: {item.total_mod_count}\n"
+                                  f"Fractured: {'Да' if item.has_fractured_mod() else 'Нет'}")
+                dialog.destroy()
+            else:
+                messagebox.showerror("Ошибка",
+                                   "Не удалось распарсить предмет.\n"
+                                   "Проверьте формат текста.")
+
+        ttk.Button(button_frame, text="Импортировать",
+                  command=import_item).pack(side='left', padx=5)
+        ttk.Button(button_frame, text="Отмена",
+                  command=dialog.destroy).pack(side='left', padx=5)
 
     def _add_mod_dialog(self, item_num, mod_type):
         """Диалог добавления мода"""
